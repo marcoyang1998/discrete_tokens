@@ -1,0 +1,111 @@
+import torch
+from WavLM import WavLM, WavLMConfig
+
+from lhotse import load_manifest_lazy
+from lhotse.cut import MonoCut
+from lhotse.features.io import NumpyHdf5Writer
+from torch.utils.data import DataLoader
+from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
+
+from icefall.utils import make_pad_mask
+
+def test_wavlm():
+    # load the pre-trained checkpoints
+    checkpoint = torch.load('WavLM-Base+.pt')
+    cfg = WavLMConfig(checkpoint['cfg'])
+    model = WavLM(cfg)
+    model.load_state_dict(checkpoint['model'])
+    model.eval()
+    
+    device = torch.device("cuda")
+    model.to(device)
+
+    # extract the representation of last layer
+    wav_input_16khz = torch.randn(1,10000).to(device)
+    if cfg.normalize:
+        wav_input_16khz = torch.nn.functional.layer_norm(wav_input_16khz , wav_input_16khz.shape)
+    rep = model.extract_features(wav_input_16khz)[0]
+
+    # extract the representation of each layer
+    wav_input_16khz = torch.randn(1,10000)
+    padding_mask = torch.zeros(1, 10000).bool()
+    if cfg.normalize:
+        wav_input_16khz = torch.nn.functional.layer_norm(wav_input_16khz , wav_input_16khz.shape)
+    import pdb; pdb.set_trace()
+    rep, layer_results = model.extract_features(wav_input_16khz, padding_mask=padding_mask, output_layer=model.cfg.encoder_layers, ret_layer_results=True)[0]
+    layer_reps = [x.transpose(0, 1) for x, _ in layer_results]
+    
+def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=200):
+    # load the pre-trained checkpoints
+    checkpoint = torch.load('WavLM-Base+.pt')
+    cfg = WavLMConfig(checkpoint['cfg'])
+    model = WavLM(cfg)
+    model.load_state_dict(checkpoint['model'])
+    model.eval()
+    
+    manifest = load_manifest_lazy(manifest_path)
+    dataset = UnsupervisedWaveformDataset(
+        manifest
+    )
+    
+    sampler = DynamicBucketingSampler(
+        manifest,
+        max_duration=max_duration,
+        shuffle=False,
+        drop_last=False,
+    )
+    
+    dl = DataLoader(
+        dataset,
+        sampler=sampler,
+        batch_size=None,
+        num_workers=1,
+        persistent_workers=False,
+    )
+    
+    device = torch.device("cuda")
+    model.to(device)
+    
+    new_cuts = []
+    with NumpyHdf5Writer(embedding_path) as writer:
+        for i, batch in enumerate(dl):
+            cuts = batch["cuts"]
+            audio_input_16khz = batch["audio"].to(device)
+            audio_lens = batch["audio_lens"].to(device)
+            padding_mask = make_pad_mask(audio_lens)
+            
+            if cfg.normalize:
+                audio_input_16khz = torch.nn.functional.layer_norm(audio_input_16khz, audio_input_16khz.shape)
+            
+            (rep, layer_results), padding_mask = model.extract_features(
+                audio_input_16khz,
+                padding_mask=padding_mask,
+                output_layer=model.cfg.encoder_layers,
+                ret_layer_results=True
+            )
+            import pdb; pdb.set_trace()
+            layer_results = [res[0].permute(1,0,2) for res in layer_results] # (B,T,C)
+            
+            import pdb; pdb.set_trace()
+            for cut in cuts:
+                new_cut = MonoCut(
+                    id=cut.id,
+                    start=cut.start,
+                    duration=cut.duration,
+                    channel=cut.channel,
+                )
+                new_cut.wavlm_embedding = writer.store_array(
+                    key=cut.id,
+                    value=layer_results[layer_idx],
+                )
+            
+        
+if __name__=="__main__":
+    manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
+    embedding_path = "wavlm_embeddings/wavlm-base-plus-dev-clean.h5"
+    max_duration = 100
+    collect_results(
+        manifest_path=manifest_path,
+        embedding_path=embedding_path,
+        max_duration=max_duration,
+    )
