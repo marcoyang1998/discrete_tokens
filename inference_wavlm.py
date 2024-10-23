@@ -1,7 +1,7 @@
 import torch
 from WavLM import WavLM, WavLMConfig
 
-from lhotse import load_manifest_lazy
+from lhotse import load_manifest_lazy, CutSet
 from lhotse.cut import MonoCut
 from lhotse.features.io import NumpyHdf5Writer
 from torch.utils.data import DataLoader
@@ -35,6 +35,7 @@ def test_wavlm():
     rep, layer_results = model.extract_features(wav_input_16khz, padding_mask=padding_mask, output_layer=model.cfg.encoder_layers, ret_layer_results=True)[0]
     layer_reps = [x.transpose(0, 1) for x, _ in layer_results]
     
+@torch.no_grad()
 def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=200):
     # load the pre-trained checkpoints
     checkpoint = torch.load('WavLM-Base+.pt')
@@ -67,6 +68,7 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
     model.to(device)
     
     new_cuts = []
+    num_cuts = 0
     with NumpyHdf5Writer(embedding_path) as writer:
         for i, batch in enumerate(dl):
             cuts = batch["cuts"]
@@ -83,11 +85,11 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                 output_layer=model.cfg.encoder_layers,
                 ret_layer_results=True
             )
-            import pdb; pdb.set_trace()
-            layer_results = [res[0].permute(1,0,2) for res in layer_results] # (B,T,C)
             
-            import pdb; pdb.set_trace()
-            for cut in cuts:
+            layer_results = [res[0].permute(1,0,2).cpu().numpy() for res in layer_results] # (B,T,C)
+            embedding_lens = (~padding_mask).sum(dim=-1)
+            
+            for j, cut in enumerate(cuts):
                 new_cut = MonoCut(
                     id=cut.id,
                     start=cut.start,
@@ -96,8 +98,18 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                 )
                 new_cut.wavlm_embedding = writer.store_array(
                     key=cut.id,
-                    value=layer_results[layer_idx],
+                    value=layer_results[layer_idx][:embedding_lens[j]],
+                    temporal_dim=0,
+                    frame_shift=0.02,
+                    start=0,
                 )
+                new_cuts.append(new_cut)
+                num_cuts += 1
+                if num_cuts and num_cuts % 100 == 0:
+                    print(f"Cuts processed until now: {num_cuts}")
+    
+    new_cuts = CutSet.from_cuts(new_cuts)
+    new_cuts.to_jsonl(f"dev-clean-wavlm-base-plus-layer-{layer_idx}.jsonl.gz")
             
         
 if __name__=="__main__":
@@ -107,5 +119,6 @@ if __name__=="__main__":
     collect_results(
         manifest_path=manifest_path,
         embedding_path=embedding_path,
+        layer_idx=10,
         max_duration=max_duration,
     )
