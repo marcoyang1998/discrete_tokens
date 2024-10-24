@@ -1,6 +1,7 @@
 import argparse
 import logging
 import joblib
+import os
 
 from lhotse import CutSet, load_manifest_lazy
 from lhotse.cut import MonoCut
@@ -109,8 +110,13 @@ def train_kmeans(args, cuts):
 def compute_kmeans_label(args):
     
     cuts = load_manifest_lazy(args.manifest_path)
+    
     # train a kmeans model
-    km_model = train_kmeans(args, cuts=cuts)
+    if not os.path.exists(args.kmeans_model_path):
+        km_model = train_kmeans(args, cuts=cuts)
+    else:
+        logging.info(f"Loading pretrained kmeans model from {args.kmeans_model_path}")
+        km_model = joblib.load(args.kmeans_model_path)
     
     new_cuts = []
     for i, cut in enumerate(cuts):
@@ -122,14 +128,14 @@ def compute_kmeans_label(args):
         )
         embedding = cut.load_custom("wavlm_embedding")
         labels = km_model.predict(embedding)
-        new_cut.wavlm_cluster = labels
+        new_cut.wavlm_cluster = labels.tolist()
         
         new_cuts.append(new_cut)
+        if i % 200 == 0 and i > 0:
+            logging.info(f"Processed {i} cuts")
         
     CutSet.from_cuts(new_cuts).to_jsonl(args.output_manifest)
     logging.info(f"The output manifest is saved to {args.output_manifest}")
-    
-        
         
     
 if __name__=="__main__":
