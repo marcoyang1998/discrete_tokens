@@ -15,6 +15,13 @@ def get_parser():
     )
     
     parser.add_argument(
+        "--model-name",
+        type=str,
+        choices=["wavlm", "hubert"],
+        required=True,
+    )
+    
+    parser.add_argument(
         "--manifest-path",
         type=str,
         required=True,
@@ -79,12 +86,12 @@ def train_kmeans(args, cuts):
     # train a kmeans model and return it
     all_embeddings = []
     for i, cut in enumerate(cuts):
-        embedding = cut.load_custom("wavlm_embedding")
+        embedding = cut.load_custom(f"{args.model_name}_embedding")
         all_embeddings.append(embedding)
         if i % 200 == 0 and i > 0:
             logging.info(f"Loaded {i} cuts")
     
-    logging.info("Finish loading all the wavlm embeddings")
+    logging.info("Finish loading all the embeddings")
     all_embeddings = np.concatenate(all_embeddings, axis=0) 
     
     km_model = get_km_model(
@@ -126,9 +133,12 @@ def compute_kmeans_label(args):
             duration=cut.duration,
             channel=cut.channel,
         )
-        embedding = cut.load_custom("wavlm_embedding")
+        embedding = cut.load_custom(f"{args.model_name}_embedding")
         labels = km_model.predict(embedding)
-        new_cut.wavlm_cluster = labels.tolist()
+        if args.model_name == "wavlm":
+            new_cut.wavlm_cluster = labels.tolist()
+        else:
+            new_cut.hubert_cluster = labels.tolist()
         
         new_cuts.append(new_cut)
         if i % 200 == 0 and i > 0:
