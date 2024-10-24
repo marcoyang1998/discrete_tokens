@@ -123,7 +123,7 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                     print(f"Cuts processed until now: {num_cuts}")
     
     new_cuts = CutSet.from_cuts(new_cuts)
-    new_cuts.to_jsonl(f"dev-clean-hubert-base-layer-{layer_idx}.jsonl.gz")
+    new_cuts.to_jsonl(f"manifests/dev-clean-hubert-base-layer-{layer_idx}.jsonl.gz")
             
         
 if __name__=="__main__":
@@ -134,6 +134,6 @@ if __name__=="__main__":
     collect_results(
         manifest_path=manifest_path,
         embedding_path=embedding_path,
-        layer_idx=-1,
+        layer_idx=12,
         max_duration=max_duration,
     )
