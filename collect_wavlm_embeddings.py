@@ -31,7 +31,6 @@ def test_wavlm():
     padding_mask = torch.zeros(1, 10000).bool()
     if cfg.normalize:
         wav_input_16khz = torch.nn.functional.layer_norm(wav_input_16khz , wav_input_16khz.shape)
-    import pdb; pdb.set_trace()
     rep, layer_results = model.extract_features(wav_input_16khz, padding_mask=padding_mask, output_layer=model.cfg.encoder_layers, ret_layer_results=True)[0]
     layer_reps = [x.transpose(0, 1) for x, _ in layer_results]
     
@@ -86,7 +85,8 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                 ret_layer_results=True
             )
             
-            layer_results = [res[0].permute(1,0,2).cpu().numpy() for res in layer_results] # (B,T,C)
+            layer_results = [res.permute(1,0,2).cpu().numpy() for res, _ in layer_results] # list of (B,T,C)
+            layer_results = layer_results[layer_idx] # (B,T,C)
             embedding_lens = (~padding_mask).sum(dim=-1)
             
             for j, cut in enumerate(cuts):
@@ -98,7 +98,7 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                 )
                 new_cut.wavlm_embedding = writer.store_array(
                     key=cut.id,
-                    value=layer_results[layer_idx][:embedding_lens[j]],
+                    value=layer_results[j][:embedding_lens[j]],
                     temporal_dim=0,
                     frame_shift=0.02,
                     start=0,
@@ -119,6 +119,6 @@ if __name__=="__main__":
     collect_results(
         manifest_path=manifest_path,
         embedding_path=embedding_path,
-        layer_idx=10,
+        layer_idx=-1,
         max_duration=max_duration,
     )
