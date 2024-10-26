@@ -17,7 +17,7 @@ def get_parser():
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=["wavlm", "hubert"],
+        choices=["wavlm", "hubert", "whisper"],
         required=True,
     )
     
@@ -25,6 +25,7 @@ def get_parser():
         "--manifest-path",
         type=str,
         required=True,
+        help="The path to the manifest containing the embeddings",
     )
     
     parser.add_argument(
@@ -135,10 +136,7 @@ def compute_kmeans_label(args):
         )
         embedding = cut.load_custom(f"{args.model_name}_embedding")
         labels = km_model.predict(embedding)
-        if args.model_name == "wavlm":
-            new_cut.wavlm_cluster = labels.tolist()
-        else:
-            new_cut.hubert_cluster = labels.tolist()
+        setattr(new_cut, f"{args.model_name}_cluster", labels.tolist())
         
         new_cuts.append(new_cut)
         if i % 200 == 0 and i > 0:
