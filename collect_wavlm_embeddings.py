@@ -1,3 +1,5 @@
+import logging
+
 import torch
 from WavLM import WavLM, WavLMConfig
 
@@ -35,9 +37,12 @@ def test_wavlm():
     layer_reps = [x.transpose(0, 1) for x, _ in layer_results]
     
 @torch.no_grad()
-def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=200):
+def collect_results(model_name, manifest_path, embedding_path, output_manifest_path, layer_idx=21, max_duration=200):
     # load the pre-trained checkpoints
-    checkpoint = torch.load('WavLM-Base+.pt')
+    if model_name == "wavlm-base-plus":
+        checkpoint = torch.load('WavLM-Base+.pt')
+    elif model_name == "wavlm-base":
+        checkpoint = torch.load('WavLM-Base.pt')
     cfg = WavLMConfig(checkpoint['cfg'])
     model = WavLM(cfg)
     model.load_state_dict(checkpoint['model'])
@@ -105,20 +110,30 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                 )
                 new_cuts.append(new_cut)
                 num_cuts += 1
-                if num_cuts and num_cuts % 100 == 0:
-                    print(f"Cuts processed until now: {num_cuts}")
+                if num_cuts and num_cuts % 200 == 0:
+                    logging.info(f"Cuts processed until now: {num_cuts}")
     
     new_cuts = CutSet.from_cuts(new_cuts)
-    new_cuts.to_jsonl(f"dev-clean-wavlm-base-plus-layer-{layer_idx}.jsonl.gz")
+    new_cuts.to_jsonl(output_manifest_path)
+    logging.info(f"Manifest saved to {output_manifest_path}")
             
         
 if __name__=="__main__":
+    formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
+    logging.basicConfig(format=formatter, level=logging.INFO)
+    
+    model_name = "wavlm-base"
     manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
-    embedding_path = "wavlm_embeddings/wavlm-base-plus-dev-clean.h5"
+    embedding_path = f"wavlm_embeddings/{model_name}-dev-clean.h5"
+    layer_idx = -1
+    output_manifest_path = f"manifests/dev-clean-{model_name}-layer-{layer_idx}.jsonl.gz"
+    
     max_duration = 100
     collect_results(
+        model_name=model_name,
         manifest_path=manifest_path,
         embedding_path=embedding_path,
-        layer_idx=-1,
+        output_manifest_path=output_manifest_path,
+        layer_idx=layer_idx,
         max_duration=max_duration,
     )
