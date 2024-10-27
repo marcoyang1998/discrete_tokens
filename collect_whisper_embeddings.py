@@ -1,3 +1,4 @@
+import argparse
 import logging
 
 import torch
@@ -11,6 +12,25 @@ from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
 from icefall.utils import make_pad_mask
 from models import WhisperTeacher
+
+def get_parser():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    
+    parser.add_argument(
+        "--whisper-version",
+        type=str,
+        required=True,
+    )
+    
+    parser.add_argument(
+        "--layer-idx",
+        type=int,
+        default=-1,
+    )
+    
+    return parser.parse_args()
 
 def remove_short_and_long_utt(c):
     if c.duration < 1.0 or c.duration > 30.0:
@@ -67,7 +87,7 @@ def collect_whisper_embeddings(whisper_version, manifest_path, embedding_path, o
             embeddings, embedding_lens = model.get_embeddings(
                 audio, 
                 audio_lens,
-                layer_idx=layer_idx # which layer's embedding to be stored
+                layer_idx=layer_idx # which layer's embedding to be stored, index starts from zero
             )
             embeddings = embeddings.detach().to("cpu").numpy()
             
@@ -99,10 +119,11 @@ if __name__=="__main__":
     formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
     logging.basicConfig(format=formatter, level=logging.INFO)
     
-    whisper_version = "small.en"
+    args = get_parser()
+    whisper_version = args.whisper_version
+    layer_idx = args.layer_idx
     manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
     embedding_path = f"whisper_embeddings/whisper-{whisper_version}-dev-clean.h5"
-    layer_idx = -1
     output_manifest_path = f"manifests/dev-clean-whisper-{whisper_version}-layer-{layer_idx}.jsonl.gz"
     
     max_duration = 100
