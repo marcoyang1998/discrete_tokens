@@ -1,4 +1,4 @@
 data
-wavlm_embeddings
+*_embeddings
 *.pt
 *.jsonl.gz

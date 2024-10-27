@@ -17,7 +17,7 @@ def get_parser():
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=["wavlm", "hubert", "whisper"],
+        choices=["wavlm", "hubert", "whisper", "data2vec"],
         required=True,
     )
     
@@ -107,7 +107,6 @@ def train_kmeans(args, cuts):
     )
     
     logging.info("Start training the kmeans model")
-    import pdb; pdb.set_trace()
     km_model.fit(all_embeddings)
     
     logging.info(f"Saving the kmeans model to {args.kmeans_model_path}")
@@ -117,6 +116,7 @@ def train_kmeans(args, cuts):
 
 def compute_kmeans_label(args):
     
+    logging.info(f"Loading manifest from {args.manifest_path}")
     cuts = load_manifest_lazy(args.manifest_path)
     
     # train a kmeans model
