@@ -51,7 +51,7 @@ class WhisperTeacher(Teacher):
         for block in self.model.blocks:
             x = block(x)
             results.append(x)
-        if layer_idx == -1: # use the last layer
+        if layer_idx == -1 or layer_idx == len(results) - 1: # use the last layer
             x = self.model.ln_post(x)
         else:
             x = results[layer_idx] # zero-based index
