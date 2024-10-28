@@ -1,3 +1,6 @@
+import argparse
+import logging
+
 import torch
 
 from lhotse import load_manifest_lazy, CutSet
@@ -7,6 +10,34 @@ from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
 import fairseq
+
+def get_parser():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    
+    parser.add_argument(
+        "--hubert-version",
+        type=str,
+        choices=["large", "base"],
+        required=True,
+    )
+    
+    parser.add_argument(
+        "--hubert-ckpt",
+        type=str,
+        help="path to the hubert checkpoint",
+        required=True,
+    )
+    
+    parser.add_argument(
+        "--layer-idx",
+        type=int,
+        default=-1,
+        help="The index starts from 1, so if you want the 12-th layer feature, just set it to 12"
+    )
+    
+    return parser.parse_args()
 
 def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
     """
@@ -52,12 +83,18 @@ def test_hubert():
     padding_mask = torch.zeros(1, 10000).bool()
     layer_idx=12
     rep, padding_mask = model.extract_features(wav_input_16khz, padding_mask=padding_mask, output_layer=layer_idx)
-    print(rep.shape)
+    logging.info(rep.shape)
     
 @torch.no_grad()
-def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=200):
+def collect_results(
+    ckpt_path,
+    manifest_path,
+    embedding_path,
+    output_manifest_path,
+    layer_idx=21,
+    max_duration=200
+):
     # load the pre-trained checkpoints
-    ckpt_path = "hubert_base_ls960.pt"
     models, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([ckpt_path])
     model = models[0]
     model.eval()
@@ -120,20 +157,33 @@ def collect_results(manifest_path, embedding_path, layer_idx=21, max_duration=20
                 new_cuts.append(new_cut)
                 num_cuts += 1
                 if num_cuts and num_cuts % 100 == 0:
-                    print(f"Cuts processed until now: {num_cuts}")
+                    logging.info(f"Cuts processed until now: {num_cuts}")
     
     new_cuts = CutSet.from_cuts(new_cuts)
-    new_cuts.to_jsonl(f"manifests/dev-clean-hubert-base-layer-{layer_idx}.jsonl.gz")
+    new_cuts.to_jsonl(output_manifest_path)
+    logging.info(f"Manifest saved to {output_manifest_path}")
             
         
 if __name__=="__main__":
+    formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
+    logging.basicConfig(format=formatter, level=logging.INFO)
+    
+    args = get_parser()
+    hubert_version = args.hubert_version
+    ckpt_path = args.hubert_ckpt
+    layer_idx = args.layer_idx
+    
     manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
-    embedding_path = "hubert_embeddings/hubert-base-dev-clean.h5"
+    embedding_path = f"hubert_embeddings/hubert-{hubert_version}-layer-{layer_idx}-dev-clean.h5"
+    output_manifest_path = f"manifests/dev-clean-hubert-{hubert_version}-layer-{layer_idx}.jsonl.gz"
+
     max_duration = 100
     
     collect_results(
+        ckpt_path=ckpt_path,
         manifest_path=manifest_path,
         embedding_path=embedding_path,
-        layer_idx=12,
+        output_manifest_path=output_manifest_path,
+        layer_idx=layer_idx,
         max_duration=max_duration,
     )

@@ -1,4 +1,5 @@
 import logging
+import argparse
 
 import torch
 from WavLM import WavLM, WavLMConfig
@@ -10,6 +11,32 @@ from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
 from icefall.utils import make_pad_mask
+
+def get_parser():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    
+    parser.add_argument(
+        "--wavlm-version",
+        type=str,
+        required=True,
+    )
+    
+    parser.add_argument(
+        "--wavlm-ckpt",
+        type=str,
+        required=True,
+    )
+    
+    parser.add_argument(
+        "--layer-idx",
+        type=int,
+        default=-1,
+        help="Index starts from 0, to get the 12-th layer features, set layer-idx=11"
+    )
+    
+    return parser.parse_args()
 
 def test_wavlm():
     # load the pre-trained checkpoints
@@ -37,12 +64,9 @@ def test_wavlm():
     layer_reps = [x.transpose(0, 1) for x, _ in layer_results]
     
 @torch.no_grad()
-def collect_results(model_name, manifest_path, embedding_path, output_manifest_path, layer_idx=21, max_duration=200):
-    # load the pre-trained checkpoints
-    if model_name == "wavlm-base-plus":
-        checkpoint = torch.load('WavLM-Base+.pt')
-    elif model_name == "wavlm-base":
-        checkpoint = torch.load('WavLM-Base.pt')
+def collect_results(ckpt_path, manifest_path, embedding_path, output_manifest_path, layer_idx=21, max_duration=200):
+    
+    checkpoint = torch.load(ckpt_path)
     cfg = WavLMConfig(checkpoint['cfg'])
     model = WavLM(cfg)
     model.load_state_dict(checkpoint['model'])
@@ -122,15 +146,18 @@ if __name__=="__main__":
     formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
     logging.basicConfig(format=formatter, level=logging.INFO)
     
-    model_name = "wavlm-base"
+    args = get_parser()
+    wavlm_version = args.wavlm_version
+    ckpt_path = args.wavlm_ckpt
+    layer_idx = args.layer_idx
+    
     manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
-    embedding_path = f"wavlm_embeddings/{model_name}-dev-clean.h5"
-    layer_idx = -1
-    output_manifest_path = f"manifests/dev-clean-{model_name}-layer-{layer_idx}.jsonl.gz"
+    embedding_path = f"wavlm_embeddings/wavlm-{wavlm_version}-dev-clean.h5"
+    output_manifest_path = f"manifests/dev-clean-wavlm-{wavlm_version}-layer-{layer_idx}.jsonl.gz"
     
     max_duration = 100
     collect_results(
-        model_name=model_name,
+        ckpt_path=ckpt_path,
         manifest_path=manifest_path,
         embedding_path=embedding_path,
         output_manifest_path=output_manifest_path,

@@ -10,7 +10,6 @@ from lhotse.features.io import NumpyHdf5Writer
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from icefall.utils import make_pad_mask
 from models import WhisperTeacher
 
 def get_parser():
