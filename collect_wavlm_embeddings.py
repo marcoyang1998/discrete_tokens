@@ -21,6 +21,7 @@ def get_parser():
         "--wavlm-version",
         type=str,
         required=True,
+        choices=["base", "base-plus", "large"]
     )
     
     parser.add_argument(
@@ -34,6 +35,12 @@ def get_parser():
         type=int,
         default=-1,
         help="Index starts from 0, to get the 12-th layer features, set layer-idx=11"
+    )
+    
+    parser.add_argument(
+        "--subset",
+        type=str,
+        required=True,
     )
     
     return parser.parse_args()
@@ -150,10 +157,11 @@ if __name__=="__main__":
     wavlm_version = args.wavlm_version
     ckpt_path = args.wavlm_ckpt
     layer_idx = args.layer_idx
+    subset = args.subset
     
-    manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
-    embedding_path = f"wavlm_embeddings/wavlm-{wavlm_version}-dev-clean.h5"
-    output_manifest_path = f"manifests/dev-clean-wavlm-{wavlm_version}-layer-{layer_idx}.jsonl.gz"
+    manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
+    embedding_path = f"embeddings/wavlm_embeddings/wavlm-{wavlm_version}-{subset}.h5"
+    output_manifest_path = f"manifests/{subset}-wavlm-{wavlm_version}-layer-{layer_idx}.jsonl.gz"
     
     max_duration = 100
     collect_results(

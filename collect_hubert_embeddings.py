@@ -37,6 +37,12 @@ def get_parser():
         help="The index starts from 1, so if you want the 12-th layer feature, just set it to 12"
     )
     
+    parser.add_argument(
+        "--subset",
+        type=str,
+        required=True,
+    )
+    
     return parser.parse_args()
 
 def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
@@ -172,10 +178,11 @@ if __name__=="__main__":
     hubert_version = args.hubert_version
     ckpt_path = args.hubert_ckpt
     layer_idx = args.layer_idx
+    subset = args.subset
     
-    manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
-    embedding_path = f"hubert_embeddings/hubert-{hubert_version}-layer-{layer_idx}-dev-clean.h5"
-    output_manifest_path = f"manifests/dev-clean-hubert-{hubert_version}-layer-{layer_idx}.jsonl.gz"
+    manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
+    embedding_path = f"embeddings/hubert_embeddings/hubert-{hubert_version}-layer-{layer_idx}-{subset}.h5"
+    output_manifest_path = f"manifests/{subset}-hubert-{hubert_version}-layer-{layer_idx}.jsonl.gz"
 
     max_duration = 100
     
