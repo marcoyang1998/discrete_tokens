@@ -5,9 +5,11 @@ import os
 
 from lhotse import CutSet, load_manifest_lazy
 from lhotse.cut import MonoCut
+from lhotse.utils import fastcopy
 
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
+from icefall.utils import str2bool
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -56,6 +58,13 @@ def get_parser():
     parser.add_argument("--kmeans-model-path", type=str, required=True)
     parser.add_argument("--output-manifest", type=str, required=True)
     
+    parser.add_argument(
+        "--normalize",
+        type=str2bool,
+        default=False,
+        help="If normalize each dimension to zero mean and unit variance"
+    )
+    
     return parser.parse_args()
 
 
@@ -82,6 +91,13 @@ def get_km_model(
         n_init=n_init,
         reassignment_ratio=reassignment_ratio,
     )
+
+def normalize_embedding(x: np.array):
+    # normalize each feature dimension of to have zero mean and unit variance
+    # (x - x.mean)/x.std()
+    # x.shape: (N,C)
+    x_mean = x.mean(axis=0) # (N)
+    x_std = x.std(axis=0)
 
 def train_kmeans(args, cuts):
     # train a kmeans model and return it
@@ -128,16 +144,10 @@ def compute_kmeans_label(args):
     
     new_cuts = []
     for i, cut in enumerate(cuts):
-        new_cut = MonoCut(
-            id=cut.id,
-            start=cut.start,
-            duration=cut.duration,
-            channel=cut.channel,
-        )
         embedding = cut.load_custom(f"{args.model_name}_embedding")
         labels = km_model.predict(embedding)
-        setattr(new_cut, f"{args.model_name}_cluster", labels.tolist())
-        
+        cut.custom.update({"tokens": labels.tolist()})
+        new_cut = fastcopy(cut)
         new_cuts.append(new_cut)
         if i % 200 == 0 and i > 0:
             logging.info(f"Processed {i} cuts")
