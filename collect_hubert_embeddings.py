@@ -5,7 +5,8 @@ import torch
 
 from lhotse import load_manifest_lazy, CutSet
 from lhotse.cut import MonoCut
-from lhotse.features.io import NumpyHdf5Writer
+from lhotse.features.io import NumpyHdf5Writer, LilcomChunkyWriter
+from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
@@ -19,7 +20,7 @@ def get_parser():
     parser.add_argument(
         "--hubert-version",
         type=str,
-        choices=["large", "base"],
+        choices=["large", "base", "large-ft960"],
         required=True,
     )
     
@@ -130,7 +131,7 @@ def collect_results(
     
     new_cuts = []
     num_cuts = 0
-    with NumpyHdf5Writer(embedding_path) as writer:
+    with LilcomChunkyWriter(embedding_path) as writer:
         for i, batch in enumerate(dl):
             cuts = batch["cuts"]
             audio_input_16khz = batch["audio"].to(device)
@@ -147,18 +148,16 @@ def collect_results(
             embedding_lens = (~padding_mask).sum(dim=-1)
             
             for j, cut in enumerate(cuts):
-                new_cut = MonoCut(
-                    id=cut.id,
-                    start=cut.start,
-                    duration=cut.duration,
-                    channel=cut.channel,
-                )
-                new_cut.hubert_embedding = writer.store_array(
+                hubert_embedding = writer.store_array(
                     key=cut.id,
                     value=layer_results[j, :embedding_lens[j]],
                     temporal_dim=0,
                     frame_shift=0.02,
                     start=0,
+                )
+                new_cut = fastcopy(
+                    cut,
+                    custom={"hubert_embedding": hubert_embedding}
                 )
                 new_cuts.append(new_cut)
                 num_cuts += 1
