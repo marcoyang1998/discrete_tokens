@@ -24,6 +24,13 @@ def get_parser():
     )
     
     parser.add_argument(
+        "--model-version",
+        type=str,
+        required=True,
+        help="The version of the model to use, only used for saving stats of normalization",
+    )
+    
+    parser.add_argument(
         "--manifest-path",
         type=str,
         required=True,
@@ -92,12 +99,15 @@ def get_km_model(
         reassignment_ratio=reassignment_ratio,
     )
 
-def normalize_embedding(x: np.array):
+def normalize_embedding(x: np.array, x_mean=None, x_std=None):
     # normalize each feature dimension of to have zero mean and unit variance
     # (x - x.mean)/x.std()
     # x.shape: (N,C)
-    x_mean = x.mean(axis=0) # (N)
-    x_std = x.std(axis=0)
+    if x_mean is None and x_std is None:
+        x_mean = x.mean(axis=0) # (N)
+        x_std = x.std(axis=0)
+        
+    return (x - x_mean) / x_std, x_mean, x_std
 
 def train_kmeans(args, cuts):
     # train a kmeans model and return it
@@ -109,7 +119,15 @@ def train_kmeans(args, cuts):
             logging.info(f"Loaded {i} cuts")
     
     logging.info("Finish loading all the embeddings")
-    all_embeddings = np.concatenate(all_embeddings, axis=0) 
+    all_embeddings = np.concatenate(all_embeddings, axis=0)
+    
+    if args.normalize:
+        logging.info(f"Start normalizing the embeddings")
+        all_embeddings, mu, sigma = normalize_embedding(all_embeddings)
+        logging.info(f"Saving the normalization stats to normalization_stats folder")
+        np.save(f"normalization_stats/{args.model_name}-{args.model_version}-mu.npy", mu)
+        np.save(f"normalization_stats/{args.model_name}-{args.model_version}-std.npy", sigma)
+        
     
     km_model = get_km_model(
         n_clusters=args.n_clusters,
@@ -141,10 +159,16 @@ def compute_kmeans_label(args):
     else:
         logging.info(f"Loading pretrained kmeans model from {args.kmeans_model_path}")
         km_model = joblib.load(args.kmeans_model_path)
+        
+    if args.normalize:
+        global_mean = np.load(f"normalization_stats/{args.model_name}-{args.model_version}-mu.npy")
+        global_std = np.load(f"normalization_stats/{args.model_name}-{args.model_version}-std.npy")
     
     new_cuts = []
     for i, cut in enumerate(cuts):
         embedding = cut.load_custom(f"{args.model_name}_embedding")
+        if args.normalize:
+            embedding = normalize_embedding(embedding, global_mean, global_std)
         labels = km_model.predict(embedding)
         cut.custom.update({"tokens": labels.tolist()})
         new_cut = fastcopy(cut)
