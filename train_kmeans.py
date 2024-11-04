@@ -168,7 +168,7 @@ def compute_kmeans_label(args):
     for i, cut in enumerate(cuts):
         embedding = cut.load_custom(f"{args.model_name}_embedding")
         if args.normalize:
-            embedding = normalize_embedding(embedding, global_mean, global_std)
+            embedding, _, _ = normalize_embedding(embedding, global_mean, global_std)
         labels = km_model.predict(embedding)
         cut.custom.update({"tokens": labels.tolist()})
         new_cut = fastcopy(cut)
