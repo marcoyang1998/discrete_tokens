@@ -5,8 +5,9 @@ import torch
 import whisper
 
 from lhotse import load_manifest, CutSet
+from lhotse.utils import fastcopy
 from lhotse.cut import MonoCut
-from lhotse.features.io import NumpyHdf5Writer
+from lhotse.features.io import LilcomChunkyWriter
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
@@ -27,8 +28,14 @@ def get_parser():
         "--layer-idx",
         type=int,
         default=-1,
+        help="The index starts from zero, if 12-th layer's feature is wanted, set layer-idx=11"
     )
     
+    parser.add_argument(
+        "--subset",
+        type=str,
+        required=True,
+    )
     return parser.parse_args()
 
 def remove_short_and_long_utt(c):
@@ -77,7 +84,7 @@ def collect_whisper_embeddings(whisper_version, manifest_path, embedding_path, o
     
     new_cuts = []
     num_cuts = 0
-    with NumpyHdf5Writer(embedding_path) as writer:
+    with LilcomChunkyWriter(embedding_path) as writer:
         for i, batch in enumerate(dl):
             cuts = batch["cuts"]
             audio = batch["audio"]
@@ -97,12 +104,16 @@ def collect_whisper_embeddings(whisper_version, manifest_path, embedding_path, o
                     duration=cut.duration,
                     channel=cut.channel,
                 )
-                new_cut.whisper_embedding = writer.store_array(
+                whisper_embedding = writer.store_array(
                     key=cut.id,
                     value=embeddings[j][: embedding_lens[j]],
                     temporal_dim=0,
                     frame_shift=0.02,
                     start=cut.start,
+                )
+                new_cut = fastcopy(
+                    cut,
+                    custom={"whisper_embedding": whisper_embedding}
                 )
                 new_cuts.append(new_cut)
                 num_cuts += 1
@@ -121,11 +132,14 @@ if __name__=="__main__":
     args = get_parser()
     whisper_version = args.whisper_version
     layer_idx = args.layer_idx
-    manifest_path = "data/fbank/librispeech_cuts_dev-clean.jsonl.gz"
-    embedding_path = f"whisper_embeddings/whisper-{whisper_version}-dev-clean.h5"
-    output_manifest_path = f"manifests/dev-clean-whisper-{whisper_version}-layer-{layer_idx}.jsonl.gz"
+    subset = args.subset
+    
+    manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
+    embedding_path = f"embeddings/whisper_embeddings/whisper-{whisper_version}-layer-{layer_idx}-{subset}.h5"
+    output_manifest_path = f"manifests/{subset}-whisper-{whisper_version}-layer-{layer_idx}.jsonl.gz"
     
     max_duration = 100
+    
     collect_whisper_embeddings(
         whisper_version=whisper_version,
         manifest_path=manifest_path,
