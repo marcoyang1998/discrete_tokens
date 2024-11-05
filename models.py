@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 from whisper.audio import log_mel_spectrogram, pad_or_trim, N_FRAMES
 
-from icefall import make_pad_mask
+from utils import make_pad_mask
 
 class Teacher(torch.nn.Module):
     def __init__(

@@ -9,7 +9,7 @@ from lhotse.utils import fastcopy
 
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
-from icefall.utils import str2bool
+from utils import str2bool
 
 def get_parser():
     parser = argparse.ArgumentParser(

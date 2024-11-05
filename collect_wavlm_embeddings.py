@@ -11,7 +11,7 @@ from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from icefall.utils import make_pad_mask
+from utils import make_pad_mask
 
 def get_parser():
     parser = argparse.ArgumentParser(
