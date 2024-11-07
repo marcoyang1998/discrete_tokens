@@ -4,13 +4,12 @@ import logging
 import torch
 
 from lhotse import load_manifest_lazy, CutSet
-from lhotse.cut import MonoCut
-from lhotse.features.io import NumpyHdf5Writer, LilcomChunkyWriter
+from lhotse.features.io import LilcomChunkyWriter
 from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-import fairseq
+from transformers import AutoModel, Wav2Vec2FeatureExtractor
 
 from utils import make_pad_mask
 
@@ -23,13 +22,6 @@ def get_parser():
         "--hubert-version",
         type=str,
         choices=["large", "base", "large-ft960"],
-        required=True,
-    )
-    
-    parser.add_argument(
-        "--hubert-ckpt",
-        type=str,
-        help="path to the hubert checkpoint",
         required=True,
     )
     
@@ -68,7 +60,7 @@ def test_hubert():
     
 @torch.no_grad()
 def collect_results(
-    ckpt_path,
+    hubert_version,
     manifest_path,
     embedding_path,
     output_manifest_path,
@@ -76,8 +68,8 @@ def collect_results(
     max_duration=200
 ):
     # load the pre-trained checkpoints
-    models, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([ckpt_path])
-    model = models[0]
+    processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{hubert_version}-ll60k")
+    model = AutoModel.from_pretrained(f"facebook/hubert-{hubert_version}-ll60k")
     model.eval()
     
     manifest = load_manifest_lazy(manifest_path)
@@ -108,18 +100,28 @@ def collect_results(
     with LilcomChunkyWriter(embedding_path) as writer:
         for i, batch in enumerate(dl):
             cuts = batch["cuts"]
-            audio_input_16khz = batch["audio"].to(device)
-            audio_lens = batch["audio_lens"].to(device)
-            padding_mask = make_pad_mask(audio_lens)
-            
-            layer_results, padding_mask = model.extract_features(
-                audio_input_16khz,
-                padding_mask=padding_mask,
-                output_layer=layer_idx,
+            audio_pt = batch["audio"]
+            audio_lens_pt = batch["audio_lens"]
+            audios = []
+            for i in range(audio_pt.shape[0]):
+                audios.append(audio_pt[i, :audio_lens_pt[i]].numpy())
+                
+            inputs = processor(
+                audios, 
+                sampling_rate=16000,
+                padding=True,
+                return_attention_mask=True,
+                return_tensors="pt"
+            ).to(device)
+
+            outputs = model(
+                output_hidden_states=True,
+                **inputs,
             )
-            layer_results = layer_results.cpu().numpy()
-            
-            embedding_lens = (~padding_mask).sum(dim=-1)
+            all_layer_results = outputs.hidden_states
+            layer_results = all_layer_results[layer_idx].cpu().numpy()
+            padding_mask = model._get_feature_vector_attention_mask(layer_results.shape[1], inputs["attention_mask"])
+            embedding_lens = padding_mask.sum(dim=-1)
             
             for j, cut in enumerate(cuts):
                 hubert_embedding = writer.store_array(
@@ -149,18 +151,17 @@ if __name__=="__main__":
     
     args = get_parser()
     hubert_version = args.hubert_version
-    ckpt_path = args.hubert_ckpt
     layer_idx = args.layer_idx
     subset = args.subset
     
     manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
-    embedding_path = f"embeddings/hubert_embeddings/hubert-{hubert_version}-layer-{layer_idx}-{subset}.h5"
+    embedding_path = f"embeddings/hubert_embeddings_fixed/hubert-{hubert_version}-layer-{layer_idx}-{subset}.h5"
     output_manifest_path = f"manifests/{subset}-hubert-{hubert_version}-layer-{layer_idx}.jsonl.gz"
 
     max_duration = 100
     
     collect_results(
-        ckpt_path=ckpt_path,
+        hubert_version=hubert_version,
         manifest_path=manifest_path,
         embedding_path=embedding_path,
         output_manifest_path=output_manifest_path,
