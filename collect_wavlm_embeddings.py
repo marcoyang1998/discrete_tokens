@@ -35,7 +35,7 @@ def get_parser():
         "--layer-idx",
         type=int,
         default=-1,
-        help="Index starts from 0, to get the 12-th layer features, set layer-idx=11"
+        help="Index starts from 1, to get the 12-th layer features, set layer-idx=12"
     )
     
     parser.add_argument(
@@ -162,7 +162,7 @@ if __name__=="__main__":
     embedding_path = f"embeddings/wavlm_embeddings/wavlm-{wavlm_version}-layer-{layer_idx}-{subset}.h5"
     output_manifest_path = f"manifests/{subset}-wavlm-{wavlm_version}-layer-{layer_idx}.jsonl.gz"
     
-    max_duration = 100
+    max_duration = 200
     collect_results(
         ckpt_path=ckpt_path,
         manifest_path=manifest_path,
