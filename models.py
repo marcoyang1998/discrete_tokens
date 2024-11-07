@@ -1,8 +1,12 @@
+from typing import List, Dict
+
 import torch
 import torch.nn.functional as F
-
+import numpy as np
 from whisper.audio import log_mel_spectrogram, pad_or_trim, N_FRAMES
+from transformers import AutoProcessor, Data2VecAudioModel, AutoModel, Wav2Vec2FeatureExtractor
 
+from WavLM import WavLM, WavLMConfig
 from utils import make_pad_mask
 
 class Teacher(torch.nn.Module):
@@ -85,3 +89,136 @@ class WhisperTeacher(Teacher):
         )
         
         return features, feature_lens
+    
+class Data2Vec(torch.nn.Module):
+    def __init__(self, model_version):
+        super().__init__()
+        self.processor = AutoProcessor.from_pretrained(f"facebook/data2vec-audio-{model_version}")
+        self.model = Data2VecAudioModel.from_pretrained(f"facebook/data2vec-audio-{model_version}")
+        
+    def prepare_input_data(
+        self,
+        batch,
+    ):
+        audio_pt = batch["audio"]
+        audio_lens_pt = batch["audio_lens"]
+    
+        audios = []
+        for i in range(audio_pt.shape[0]):
+            audios.append(audio_pt[i, :audio_lens_pt[i]].numpy())
+        return audios
+    
+    def extract_features(
+        self,
+        batch: Dict,
+        layer_idx: int,
+    ):
+        audios = self.prepare_input_data(batch)
+        # the audios should be a list of np array, without padding
+        device = next(self.model.parameters()).device
+        
+        inputs = self.processor(
+            audios, 
+            sampling_rate=16000,
+            padding=True,
+            return_attention_mask=True,
+            return_tensors="pt"
+        ).to(device)
+        
+        outputs = self.model(
+            output_hidden_states=True,
+            **inputs,
+        )
+        all_layer_results = outputs.hidden_states
+        layer_results = all_layer_results[layer_idx].cpu().numpy() # (N,T,C)
+        padding_mask = self.model._get_feature_vector_attention_mask(layer_results.shape[1], inputs["attention_mask"])
+        embedding_lens = padding_mask.sum(dim=1)
+        
+        return layer_results, embedding_lens
+    
+    
+class HuBERT(torch.nn.Module):
+    def __init__(self, model_version: str):
+        super().__init__()
+        self.processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
+        self.model = AutoModel.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
+        
+    def prepare_input_data(
+        self,
+        batch,
+    ):
+        audio_pt = batch["audio"]
+        audio_lens_pt = batch["audio_lens"]
+    
+        audios = []
+        for i in range(audio_pt.shape[0]):
+            audios.append(audio_pt[i, :audio_lens_pt[i]].numpy())
+        return audios
+    
+    def extract_features(
+        self,
+        batch: Dict,
+        layer_idx: int,
+    ):
+        audios = self.prepare_input_data(batch)
+        
+        # the audios should be a list of np array, without padding
+        device = next(self.model.parameters()).device
+        
+        inputs = self.processor(
+            audios, 
+            sampling_rate=16000,
+            padding=True,
+            return_attention_mask=True,
+            return_tensors="pt"
+        ).to(device)
+
+        outputs = self.model(
+            output_hidden_states=True,
+            **inputs,
+        )
+        all_layer_results = outputs.hidden_states
+        layer_results = all_layer_results[layer_idx].cpu().numpy()
+        padding_mask = self.model._get_feature_vector_attention_mask(layer_results.shape[1], inputs["attention_mask"])
+        embedding_lens = padding_mask.sum(dim=-1)
+        
+        return layer_results, embedding_lens
+        
+        
+class WavlmModel(torch.nn.Module):
+    def __init__(self, ckpt_path: str):
+        super().__init__()
+        checkpoint = torch.load(ckpt_path)
+        cfg = WavLMConfig(checkpoint['cfg'])
+        model = WavLM(cfg)
+        model.load_state_dict(checkpoint['model'])
+        
+        self.cfg = cfg
+        self.model = model
+        
+    def extract_features(
+        self,
+        batch,
+        layer_idx: int,
+    ):
+        device = next(self.model.parameters()).device
+        
+        audio_input_16khz = batch["audio"].to(device)
+        audio_lens = batch["audio_lens"].to(device)
+        padding_mask = make_pad_mask(audio_lens)
+        
+        if self.cfg.normalize:
+            audio_input_16khz = torch.nn.functional.layer_norm(audio_input_16khz, audio_input_16khz.shape)
+        
+        (rep, layer_results), padding_mask = self.model.extract_features(
+            audio_input_16khz,
+            padding_mask=padding_mask,
+            output_layer=self.model.cfg.encoder_layers,
+            ret_layer_results=True
+        )
+        
+        layer_results = [res.permute(1,0,2).cpu().numpy() for res, _ in layer_results] # list of (B,T,C)
+        layer_results = layer_results[layer_idx] # (B,T,C)
+        embedding_lens = (~padding_mask).sum(dim=-1)
+        
+        return layer_results, embedding_lens
