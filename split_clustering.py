@@ -75,7 +75,10 @@ def merge_clusters(args):
     
     cuts_2 = cuts_2.sort_like(cuts_1)
     
-    # obtain the cluster mapping
+    # Obtain the cluster mapping
+    # This is done by constructing the confusion matrix between the token labels of the two kmeans clusters
+    # For each label in cluster 1, we find the top-k most frequent labels in cluster 2, and combine the rest
+    # labels as a single label. In the end, we will have n_clusters * (top_k + 1) new clusters after merging
     if not os.path.exists(cluster_mapping_path):
         clusters_1 = []
         clusters_2 = []
@@ -110,6 +113,7 @@ def merge_clusters(args):
         new_km_indices = torch.load(cluster_mapping_path)
     
     new_cuts = []
+    count = 0
     for cut1, cut2 in zip(cuts_1, cuts_2):
         c1 = getattr(cut1, "tokens")
         c2 = getattr(cut2, "tokens")
@@ -128,9 +132,11 @@ def merge_clusters(args):
             custom={"tokens": new_tokens}
         )
         new_cuts.append(new_cut)
+        count += 1
+        if count % 200 == 0:
+            logging.info(f"Processed {count} cuts")
         
     new_cuts = CutSet.from_cuts(new_cuts)
-    import pdb; pdb.set_trace()
     logging.info(f"Saving to {output_manifest}")
     new_cuts.to_jsonl(output_manifest)
         
