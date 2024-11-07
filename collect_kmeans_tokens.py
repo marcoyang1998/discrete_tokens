@@ -11,7 +11,7 @@ from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from models import Data2Vec
+from models import Data2Vec, WavlmModel, HuBERT
 from train_kmeans import normalize_embedding
 
 
@@ -21,9 +21,26 @@ def get_parser():
     )
     
     parser.add_argument(
-        "--model-version",
+        "--model-name",
         type=str,
+        choices=["data2vec", "wavlm", "hubert"],
         required=True,
+    )
+    
+    parser.add_argument(
+        "--data2vec-version",
+        type=str,
+    )
+    
+    parser.add_argument(
+        "--wavlm-ckpt",
+        type=str,
+        help="Path to the WavLM checkpoint",
+    )
+    
+    parser.add_argument(
+        "--hubert-version",
+        type=str,
     )
     
     parser.add_argument(
@@ -59,26 +76,25 @@ def get_parser():
     
     return parser.parse_args()       
 
-def prepare_audios(batch):
-    audio_pt = batch["audio"]
-    audio_lens_pt = batch["audio_lens"]
-    
-    audios = []
-    for i in range(audio_pt.shape[0]):
-        audios.append(audio_pt[i, :audio_lens_pt[i]].numpy())
-    return audios
-
 @torch.no_grad()
 def collect_tokens(
-    model_version,
+    model_name,
     manifest_path,
     kmeans_model_path,
     output_manifest_path,
     layer_idx=21,
     max_duration=200
 ):
-    # loading the multi teacher model
-    model = Data2Vec(model_version=model_version)
+    # loading the pre-trained model
+    if model_name == "data2vec":
+        model = Data2Vec(model_version=args.data2vec_version)
+    elif model_name == "wavlm":
+        model = WavlmModel(ckpt_path=args.wavlm_ckpt)
+    elif model_name == "hubert":
+        model = HuBERT(model_version=args.hubert_version)
+    else:
+        raise ValueError(f"{model_name} is not supported yet")
+    
     model.eval()
     
     device = torch.device("cuda")
@@ -109,8 +125,17 @@ def collect_tokens(
     
     # load the normalization stats
     logging.info("Loading normalization stats")
-    data2vec_mean = np.load("normalization_stats/data2vec-large-mu.npy")
-    data2vec_std = np.load("normalization_stats/data2vec-large-std.npy")
+    if args.model_name == "data2vec":
+        global_mean = np.load("normalization_stats/data2vec-large-mu.npy")
+        global_std = np.load("normalization_stats/data2vec-large-std.npy")
+    elif args.model_name == "wavlm":
+        global_mean = np.load("normalization_stats/wavlm-large-mu.npy")
+        global_std = np.load("normalization_stats/wavlm-large-std.npy")
+    elif args.model_name == "hubert":
+        global_mean = np.load("normalization_stats/hubert-large-mu.npy")
+        global_std = np.load("normalization_stats/hubert-large-std.npy")
+    else:
+        raise ValueError(f"{model_name} is not supported yet")
     
     # load the kmeans model
     logging.info(f"Loading kmeans model from {kmeans_model_path}")
@@ -121,18 +146,17 @@ def collect_tokens(
     # extract the kmeans label
     for i, batch in enumerate(dl):
         cuts = batch["cuts"]
-        audios = prepare_audios(batch)
-        d2v_embeddings, embedding_lens = model.extract_features(audios, layer_idx)
+        embeddings, embedding_lens = model.extract_features(batch, layer_idx)
         
         for j, cut in enumerate(cuts):
             cut = cut if isinstance(cut, MonoCut) else cut.tracks[0].cut
-            cur_d2v_embedding = normalize_embedding(
-                d2v_embeddings[j, :embedding_lens[j], :],
-                data2vec_mean,
-                data2vec_std
+            cur_embeddings = normalize_embedding(
+                embeddings[j, :embedding_lens[j], :],
+                global_mean,
+                global_std,
             )[0]
             
-            labels = kmeans_model.predict(cur_d2v_embedding)
+            labels = kmeans_model.predict(cur_embeddings)
             
             new_cut = fastcopy(
                 cut,
@@ -158,7 +182,7 @@ if __name__=="__main__":
         logging.info(f"The manifest {args.output_manifest_path} already exists. Skip this subset.")
     else:
         collect_tokens(
-            model_version=args.model_version,
+            model_name=args.model_name,
             manifest_path=args.manifest_path,
             kmeans_model_path=args.kmeans_model,
             output_manifest_path=args.output_manifest_path,
