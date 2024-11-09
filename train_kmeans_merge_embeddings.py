@@ -110,6 +110,7 @@ def train_kmeans(args, cuts_1, cuts_2):
     all_embeddings_1 = np.concatenate(all_embeddings_1)
     all_embeddings_2 = np.concatenate(all_embeddings_2)
     if args.normalize:
+        logging.info("Start normalizing the embeddings")
         global_mean_1 = np.load(f"normalization_stats/{args.model_1}-large-mu.npy")
         global_mean_2 = np.load(f"normalization_stats/{args.model_2}-large-mu.npy")
         global_std_1 = np.load(f"normalization_stats/{args.model_1}-large-std.npy")
@@ -164,8 +165,8 @@ def compute_kmeans_label(args):
     count = 0
     
     for c1, c2 in zip(cuts_1, cuts_2):
-        embed_1 = c1.load_custom("hubert_embedding")
-        embed_2 = c2.load_custom("data2vec_embedding")
+        embed_1 = c1.load_custom(f"{args.model_1}_embedding")
+        embed_2 = c2.load_custom(f"{args.model_2}_embedding")
         if embed_1.shape[0] != embed_2.shape[0]:
             min_len = min(embed_1.shape[0], embed_2.shape[0])
             embed_1 = embed_1[:min_len]
