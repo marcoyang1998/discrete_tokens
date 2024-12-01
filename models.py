@@ -4,7 +4,14 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from whisper.audio import log_mel_spectrogram, pad_or_trim, N_FRAMES
-from transformers import AutoProcessor, Data2VecAudioModel, AutoModel, Wav2Vec2FeatureExtractor
+from transformers import (
+    AutoProcessor, 
+    Data2VecAudioModel,
+    AutoModel,
+    Wav2Vec2FeatureExtractor,
+    AutoFeatureExtractor,
+    Wav2Vec2BertModel,
+)
 
 from WavLM import WavLM, WavLMConfig
 from utils import make_pad_mask
@@ -90,12 +97,12 @@ class WhisperTeacher(Teacher):
         
         return features, feature_lens
     
-class Data2Vec(torch.nn.Module):
-    def __init__(self, model_version):
+class HuggingfaceModel(torch.nn.Module):
+    def __init__(self):
         super().__init__()
-        self.processor = AutoProcessor.from_pretrained(f"facebook/data2vec-audio-{model_version}")
-        self.model = Data2VecAudioModel.from_pretrained(f"facebook/data2vec-audio-{model_version}")
-        
+        self.model = None
+        self.processor = None
+    
     def prepare_input_data(
         self,
         batch,
@@ -135,58 +142,32 @@ class Data2Vec(torch.nn.Module):
         embedding_lens = padding_mask.sum(dim=1)
         
         return layer_results, embedding_lens
-    
-    
-class HuBERT(torch.nn.Module):
-    def __init__(self, model_version: str):
-        super().__init__()
-        self.processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
-        self.model = AutoModel.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
-        
-    def prepare_input_data(
-        self,
-        batch,
-    ):
-        audio_pt = batch["audio"]
-        audio_lens_pt = batch["audio_lens"]
-    
-        audios = []
-        for i in range(audio_pt.shape[0]):
-            audios.append(audio_pt[i, :audio_lens_pt[i]].numpy())
-        return audios
-    
-    def extract_features(
-        self,
-        batch: Dict,
-        layer_idx: int,
-    ):
-        audios = self.prepare_input_data(batch)
-        
-        # the audios should be a list of np array, without padding
-        device = next(self.model.parameters()).device
-        
-        inputs = self.processor(
-            audios, 
-            sampling_rate=16000,
-            padding=True,
-            return_attention_mask=True,
-            return_tensors="pt"
-        ).to(device)
 
-        outputs = self.model(
-            output_hidden_states=True,
-            **inputs,
-        )
-        all_layer_results = outputs.hidden_states
-        layer_results = all_layer_results[layer_idx].cpu().numpy()
-        padding_mask = self.model._get_feature_vector_attention_mask(layer_results.shape[1], inputs["attention_mask"])
-        embedding_lens = padding_mask.sum(dim=-1)
+class Data2Vec(HuggingfaceModel):
+    def __init__(self, model_version: str="large"):
+        super().__init__()
+        self.processor = AutoProcessor.from_pretrained(f"facebook/data2vec-audio-{model_version}")
+        self.model = Data2VecAudioModel.from_pretrained(f"facebook/data2vec-audio-{model_version}")
+    
+    
+class HuBERT(HuggingfaceModel):
+    def __init__(self, model_version: str="large"):
+        super().__init__()
+        if model_version == "large":
+            self.processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
+            self.model = AutoModel.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
+        elif model_version == "base":
+            self.processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{model_version}-ls960")
+            self.model = AutoModel.from_pretrained(f"facebook/hubert-{model_version}-ls960")
         
-        return layer_results, embedding_lens
-        
+class W2vBERT(HuggingfaceModel):
+    def __init__(self, model_version: str="large"):
+        super().__init__()
+        self.processor = AutoFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+        self.model = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
         
 class WavlmModel(torch.nn.Module):
-    def __init__(self, ckpt_path: str):
+    def __init__(self, ckpt_path: str="models/WavLM-Large.pt"):
         super().__init__()
         checkpoint = torch.load(ckpt_path)
         cfg = WavLMConfig(checkpoint['cfg'])

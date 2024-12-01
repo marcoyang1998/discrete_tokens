@@ -9,8 +9,7 @@ from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from transformers import AutoModel, Wav2Vec2FeatureExtractor
-
+from models import Data2Vec, WavlmModel, HuBERT, W2vBERT
 from utils import make_pad_mask
 
 def get_parser():
@@ -19,9 +18,14 @@ def get_parser():
     )
     
     parser.add_argument(
-        "--hubert-version",
+        "--model-name",
         type=str,
-        choices=["large", "base", "large-ft960"],
+        choices=["hubert", "wavlm", "w2v-bert", "data2vec"]
+    )
+    
+    parser.add_argument(
+        "--model-version",
+        type=str,
         required=True,
     )
     
@@ -42,6 +46,7 @@ def get_parser():
 
 def test_hubert():
     # load the pre-trained checkpoints
+    import fairseq
     ckpt_path = "hubert_base_ls960.pt"
     models, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([ckpt_path])
     model = models[0]
@@ -60,7 +65,8 @@ def test_hubert():
     
 @torch.no_grad()
 def collect_results(
-    hubert_version,
+    model_name,
+    model_version,
     manifest_path,
     embedding_path,
     output_manifest_path,
@@ -68,8 +74,18 @@ def collect_results(
     max_duration=200
 ):
     # load the pre-trained checkpoints
-    processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{hubert_version}-ll60k")
-    model = AutoModel.from_pretrained(f"facebook/hubert-{hubert_version}-ll60k")
+    if model_name == "data2vec":
+        model = Data2Vec(model_version=model_version)
+    elif model_name == "wavlm":
+        ckpt_path = f"models/WavLM-{model_version}.pt"
+        model = WavlmModel(ckpt_path=ckpt_path)
+    elif model_name == "hubert":
+        model = HuBERT(model_version=model_version)
+    elif model_name == "w2v-bert":
+        model = W2vBERT()
+    else:
+        raise ValueError(f"{model_name} is not supported yet")
+    
     model.eval()
     
     manifest = load_manifest_lazy(manifest_path)
@@ -100,31 +116,10 @@ def collect_results(
     with LilcomChunkyWriter(embedding_path) as writer:
         for i, batch in enumerate(dl):
             cuts = batch["cuts"]
-            audio_pt = batch["audio"]
-            audio_lens_pt = batch["audio_lens"]
-            audios = []
-            for i in range(audio_pt.shape[0]):
-                audios.append(audio_pt[i, :audio_lens_pt[i]].numpy())
-                
-            inputs = processor(
-                audios, 
-                sampling_rate=16000,
-                padding=True,
-                return_attention_mask=True,
-                return_tensors="pt"
-            ).to(device)
-
-            outputs = model(
-                output_hidden_states=True,
-                **inputs,
-            )
-            all_layer_results = outputs.hidden_states
-            layer_results = all_layer_results[layer_idx].cpu().numpy()
-            padding_mask = model._get_feature_vector_attention_mask(layer_results.shape[1], inputs["attention_mask"])
-            embedding_lens = padding_mask.sum(dim=-1)
+            layer_results, embedding_lens = model.extract_features(batch, layer_idx)
             
             for j, cut in enumerate(cuts):
-                hubert_embedding = writer.store_array(
+                embedding = writer.store_array(
                     key=cut.id,
                     value=layer_results[j, :embedding_lens[j]],
                     temporal_dim=0,
@@ -133,7 +128,7 @@ def collect_results(
                 )
                 new_cut = fastcopy(
                     cut,
-                    custom={"hubert_embedding": hubert_embedding}
+                    custom={f"{model_name}_embedding": embedding}
                 )
                 new_cuts.append(new_cut)
                 num_cuts += 1
@@ -150,18 +145,20 @@ if __name__=="__main__":
     logging.basicConfig(format=formatter, level=logging.INFO)
     
     args = get_parser()
-    hubert_version = args.hubert_version
+    model_name = args.model_name
+    model_version = args.model_version
     layer_idx = args.layer_idx
     subset = args.subset
     
     manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
-    embedding_path = f"embeddings/hubert_embeddings_fixed/hubert-{hubert_version}-layer-{layer_idx}-{subset}.h5"
-    output_manifest_path = f"manifests/{subset}-hubert-{hubert_version}-layer-{layer_idx}.jsonl.gz"
+    embedding_path = f"embeddings/{model_name}_embeddings/{model_name}-{model_version}-layer-{layer_idx}-{subset}"
+    output_manifest_path = f"manifests/{subset}-{model_name}-{model_version}-layer-{layer_idx}.jsonl.gz"
 
-    max_duration = 100
+    max_duration = 10
     
     collect_results(
-        hubert_version=hubert_version,
+        model_name=model_name,
+        model_version=model_version,
         manifest_path=manifest_path,
         embedding_path=embedding_path,
         output_manifest_path=output_manifest_path,

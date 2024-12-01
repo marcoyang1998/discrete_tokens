@@ -11,7 +11,7 @@ from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from models import Data2Vec, WavlmModel, HuBERT
+from models import Data2Vec, WavlmModel, HuBERT, W2vBERT
 from train_kmeans import normalize_embedding
 
 
@@ -23,7 +23,7 @@ def get_parser():
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=["data2vec", "wavlm", "hubert"],
+        choices=["data2vec", "wavlm", "hubert", "w2v-bert"],
         required=True,
     )
     
@@ -40,6 +40,11 @@ def get_parser():
     
     parser.add_argument(
         "--hubert-version",
+        type=str,
+    )
+    
+    parser.add_argument(
+        "--w2v-bert-version",
         type=str,
     )
     
@@ -78,6 +83,7 @@ def get_parser():
 
 @torch.no_grad()
 def collect_tokens(
+    args,
     model_name,
     manifest_path,
     kmeans_model_path,
@@ -92,6 +98,8 @@ def collect_tokens(
         model = WavlmModel(ckpt_path=args.wavlm_ckpt)
     elif model_name == "hubert":
         model = HuBERT(model_version=args.hubert_version)
+    elif model_name == "w2v-bert":
+        model = W2vBERT()
     else:
         raise ValueError(f"{model_name} is not supported yet")
     
@@ -134,6 +142,9 @@ def collect_tokens(
     elif args.model_name == "hubert":
         global_mean = np.load("normalization_stats/hubert-large-mu.npy")
         global_std = np.load("normalization_stats/hubert-large-std.npy")
+    elif args.model_name == "w2v-bert":
+        global_mean = np.load("normalization_stats/w2v-bert-2.0-mu.npy")
+        global_std = np.load("normalization_stats/w2v-bert-2.0-std.npy")
     else:
         raise ValueError(f"{model_name} is not supported yet")
     
@@ -182,6 +193,7 @@ if __name__=="__main__":
         logging.info(f"The manifest {args.output_manifest_path} already exists. Skip this subset.")
     else:
         collect_tokens(
+            args,
             model_name=args.model_name,
             manifest_path=args.manifest_path,
             kmeans_model_path=args.kmeans_model,

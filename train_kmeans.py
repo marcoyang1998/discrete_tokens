@@ -19,7 +19,7 @@ def get_parser():
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=["wavlm", "hubert", "whisper", "data2vec"],
+        choices=["wavlm", "hubert", "whisper", "data2vec", "w2v-bert"],
         required=True,
     )
     
@@ -120,6 +120,7 @@ def train_kmeans(args, cuts):
     
     logging.info("Finish loading all the embeddings")
     all_embeddings = np.concatenate(all_embeddings, axis=0)
+    np.random.shuffle(all_embeddings) # shuffle the embeddings
     
     if args.normalize:
         logging.info(f"Start normalizing the embeddings")
@@ -152,6 +153,7 @@ def compute_kmeans_label(args):
     
     logging.info(f"Loading manifest from {args.manifest_path}")
     cuts = load_manifest_lazy(args.manifest_path)
+    cuts = cuts.shuffle()
     
     # train a kmeans model
     if not os.path.exists(args.kmeans_model_path):
