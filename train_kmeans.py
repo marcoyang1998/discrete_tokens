@@ -64,11 +64,13 @@ def get_parser():
     parser.add_argument("--reassignment-ratio", default=0.0, type=float)
     parser.add_argument("--kmeans-model-path", type=str, required=True)
     parser.add_argument("--output-manifest", type=str, required=True)
+    parser.add_argument("--global-mean-file", type=str, required=True)
+    parser.add_argument("--global-std-file", type=str, required=True)
     
     parser.add_argument(
         "--normalize",
         type=str2bool,
-        default=False,
+        default=True,
         help="If normalize each dimension to zero mean and unit variance"
     )
     
@@ -126,8 +128,8 @@ def train_kmeans(args, cuts):
         logging.info(f"Start normalizing the embeddings")
         all_embeddings, mu, sigma = normalize_embedding(all_embeddings)
         logging.info(f"Saving the normalization stats to normalization_stats folder")
-        np.save(f"normalization_stats/{args.model_name}-{args.model_version}-mu.npy", mu)
-        np.save(f"normalization_stats/{args.model_name}-{args.model_version}-std.npy", sigma)
+        np.save(args.global_mean_file, mu)
+        np.save(args.global_std_file, sigma)
         
     
     km_model = get_km_model(
@@ -168,8 +170,8 @@ def compute_kmeans_label(args):
         return
     
     if args.normalize:
-        global_mean = np.load(f"normalization_stats/{args.model_name}-{args.model_version}-mu.npy")
-        global_std = np.load(f"normalization_stats/{args.model_name}-{args.model_version}-std.npy")
+        global_mean = np.load(args.global_mean_file)
+        global_std = np.load(args.global_std_file)
     
     new_cuts = []
     for i, cut in enumerate(cuts):
@@ -193,4 +195,5 @@ if __name__=="__main__":
     logging.basicConfig(format=formatter, level=logging.INFO)
     
     args = get_parser()
+    logging.info(vars(args))
     compute_kmeans_label(args)
