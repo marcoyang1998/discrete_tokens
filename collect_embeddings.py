@@ -2,15 +2,15 @@ import argparse
 import logging
 
 import torch
+import os
 
 from lhotse import load_manifest_lazy, CutSet
-from lhotse.features.io import LilcomChunkyWriter
+from lhotse.features.io import LilcomChunkyWriter, NumpyHdf5Writer
 from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from models import Data2Vec, WavlmModel, HuBERT, W2vBERT
-from utils import make_pad_mask
+from models import get_model
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -20,7 +20,7 @@ def get_parser():
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=["hubert", "wavlm", "w2v-bert", "data2vec"]
+        choices=["hubert", "wavlm", "w2v-bert", "data2vec", "whisper"]
     )
     
     parser.add_argument(
@@ -46,6 +46,11 @@ def get_parser():
         "--input-manifest",
         type=str,
         required=True,
+    )
+    parser.add_argument(
+        "--max-duration",
+        type=int,
+        default=200,
     )
     
     return parser.parse_args()
@@ -80,17 +85,8 @@ def collect_results(
     max_duration=200
 ):
     # load the pre-trained checkpoints
-    if model_name == "data2vec":
-        model = Data2Vec(model_version=model_version)
-    elif model_name == "wavlm":
-        ckpt_path = f"models/WavLM-{model_version}.pt"
-        model = WavlmModel(ckpt_path=ckpt_path)
-    elif model_name == "hubert":
-        model = HuBERT(model_version=model_version)
-    elif model_name == "w2v-bert":
-        model = W2vBERT()
-    else:
-        raise ValueError(f"{model_name} is not supported yet")
+    model = get_model(args)
+    model.eval()
     
     model.eval()
     
@@ -119,7 +115,7 @@ def collect_results(
     
     new_cuts = []
     num_cuts = 0
-    with LilcomChunkyWriter(embedding_path) as writer:
+    with NumpyHdf5Writer(embedding_path) as writer:
         for i, batch in enumerate(dl):
             cuts = batch["cuts"]
             layer_results, embedding_lens = model.extract_features(batch, layer_idx)
@@ -151,6 +147,7 @@ if __name__=="__main__":
     logging.basicConfig(format=formatter, level=logging.INFO)
     
     args = get_parser()
+    logging.info(vars(args))
     model_name = args.model_name
     model_version = args.model_version
     layer_idx = args.layer_idx
@@ -160,14 +157,17 @@ if __name__=="__main__":
     embedding_path = f"embeddings/{model_name}_embeddings/{model_name}-{model_version}-layer-{layer_idx}-{subset}"
     output_manifet = f"manifests/{subset}-{model_name}-{model_version}-layer-{layer_idx}.jsonl.gz"
 
-    max_duration = 500
-    
-    collect_results(
-        model_name=model_name,
-        model_version=model_version,
-        manifest_path=input_manifest,
-        embedding_path=embedding_path,
-        output_manifest_path=output_manifet,
-        layer_idx=layer_idx,
-        max_duration=max_duration,
-    )
+    if os.path.exists(output_manifet):
+        logging.info(f"Manifest already exists at: {output_manifet}")
+        logging.info("Skip collecting the embeddings")
+        
+    else:
+        collect_results(
+            model_name=model_name,
+            model_version=model_version,
+            manifest_path=input_manifest,
+            embedding_path=embedding_path,
+            output_manifest_path=output_manifet,
+            layer_idx=layer_idx,
+            max_duration=args.max_duration,
+        )

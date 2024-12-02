@@ -3,6 +3,7 @@ from typing import List, Dict
 import torch
 import torch.nn.functional as F
 import numpy as np
+import whisper
 from whisper.audio import log_mel_spectrogram, pad_or_trim, N_FRAMES
 from transformers import (
     AutoProcessor, 
@@ -16,31 +17,39 @@ from transformers import (
 from utils import make_pad_mask
 from WavLM import WavLM, WavLMConfig
 
-class Teacher(torch.nn.Module):
+def get_model(args):
+    model_name = args.model_name
+    if model_name == "data2vec":
+        model = Data2Vec(model_version=args.model_version)
+    elif model_name == "wavlm":
+        model = WavlmModel()
+    elif model_name == "hubert":
+        model = HuBERT(model_version=args.model_version)
+    elif model_name == "w2v-bert":
+        model = W2vBERT()
+    elif model_name == "whisper":
+        model = WhisperModel(model_version=args.model_version)
+    else:
+        raise ValueError(f"{model_name} is not supported yet")
+    
+    return model
+
+class WhisperModel(torch.nn.Module):
     def __init__(
         self,
-        model: torch.nn.Module
+        model_version: str,
     ):
         super().__init__()
-        self.model = model
-        
-    def get_embeddings(self):
-        raise NotImplementedError()
-
-class WhisperTeacher(Teacher):
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        n_mels: int = 80,
-    ):
-        super().__init__(model)
-        self.n_mels = n_mels
+        whisper_model = whisper.load_model(model_version, device="cpu")
+        self.n_mels = whisper_model.dims.n_mels
+        self.model = whisper_model.encoder
         
     def forward_encoder(
         self,
         x: torch.Tensor,
         x_lens: torch.Tensor,
         layer_idx: int = -1,
+        return_all_layers: bool = False
     ):
         """
         x : torch.Tensor, shape = (batch_size, n_mels, n_ctx)
@@ -62,13 +71,54 @@ class WhisperTeacher(Teacher):
         for block in self.model.blocks:
             x = block(x)
             results.append(x)
+        x = self.model.ln_post(x)
+        
+        if return_all_layers:
+            return x, results, x_lens
+        
         if layer_idx == -1 or layer_idx == len(results) - 1: # use the last layer
-            x = self.model.ln_post(x)
+            pass
         else:
             x = results[layer_idx] # zero-based index
 
         return x, x_lens
+    
+    def forward(self, batch):
+        device = next(self.model.parameters()).device
+        audio = batch["audio"]
+        audio_lens = batch["audio_lens"]
+        
+        audio = audio.to(device)
+        audio_lens = audio_lens.to(device)
+        mel = log_mel_spectrogram(audio, n_mels=self.n_mels) # (N, n_mel, T)
+        
+        if mel.ndim == 2:
+            mel = mel.unsqueeze(0)
+        
+        mel_lens = torch.floor(audio_lens/160).int()
+        assert mel_lens.max() <= mel.size(-1)
+        
+        features, all_hidden_states, feature_lens = self.forward_encoder(
+            mel,
+            mel_lens,
+            return_all_layers=True,
+        )
+        return features, all_hidden_states, feature_lens
             
+    
+    def extract_features(
+        self,
+        batch,
+        layer_idx,
+    ):
+        audio = batch["audio"]
+        audio_lens = batch["audio_lens"]
+        
+        layer_results, embedding_lens = self.get_embeddings(
+            audio, audio_lens, layer_idx,
+        )
+        return layer_results.cpu().numpy(), embedding_lens.cpu().numpy()
+    
     @torch.no_grad()
     def get_embeddings(
         self,
