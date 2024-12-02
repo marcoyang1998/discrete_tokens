@@ -14,6 +14,7 @@ from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 from models import Data2Vec, WavlmModel, HuBERT, W2vBERT
 from train_kmeans import normalize_embedding
 
+from utils import str2bool
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -28,23 +29,7 @@ def get_parser():
     )
     
     parser.add_argument(
-        "--data2vec-version",
-        type=str,
-    )
-    
-    parser.add_argument(
-        "--wavlm-ckpt",
-        type=str,
-        help="Path to the WavLM checkpoint",
-    )
-    
-    parser.add_argument(
-        "--hubert-version",
-        type=str,
-    )
-    
-    parser.add_argument(
-        "--w2v-bert-version",
+        "--model-version",
         type=str,
     )
     
@@ -73,6 +58,12 @@ def get_parser():
         required=True
     )
     
+    parser.add_argument("--normalize", type=str2bool, default=True)
+    parser.add_argument("--weighted-combine", type=str2bool, default=True)
+    parser.add_argument("--weight-file", type=str)
+    parser.add_argument('--global-mean-file', type=str, required=True)
+    parser.add_argument('--global-std-file', type=str, required=True)
+    
     parser.add_argument(
         "--max-duration",
         type=int,
@@ -88,16 +79,17 @@ def collect_tokens(
     manifest_path,
     kmeans_model_path,
     output_manifest_path,
+    weighted_combine,
     layer_idx=21,
     max_duration=200
 ):
     # loading the pre-trained model
     if model_name == "data2vec":
-        model = Data2Vec(model_version=args.data2vec_version)
+        model = Data2Vec(model_version=args.model_version)
     elif model_name == "wavlm":
-        model = WavlmModel(ckpt_path=args.wavlm_ckpt)
+        model = WavlmModel()
     elif model_name == "hubert":
-        model = HuBERT(model_version=args.hubert_version)
+        model = HuBERT(model_version=args.model_version)
     elif model_name == "w2v-bert":
         model = W2vBERT()
     else:
@@ -128,25 +120,15 @@ def collect_tokens(
         persistent_workers=False,
     )
     
-    device = torch.device("cuda")
-    model.to(device)
+    if weighted_combine:
+        weights = torch.load(args.weight_file).to(device)
+        logging.info(f"Using weighted combine: {weights}")
     
     # load the normalization stats
-    logging.info("Loading normalization stats")
-    if args.model_name == "data2vec":
-        global_mean = np.load("normalization_stats/data2vec-large-mu.npy")
-        global_std = np.load("normalization_stats/data2vec-large-std.npy")
-    elif args.model_name == "wavlm":
-        global_mean = np.load("normalization_stats/wavlm-large-mu.npy")
-        global_std = np.load("normalization_stats/wavlm-large-std.npy")
-    elif args.model_name == "hubert":
-        global_mean = np.load("normalization_stats/hubert-large-mu.npy")
-        global_std = np.load("normalization_stats/hubert-large-std.npy")
-    elif args.model_name == "w2v-bert":
-        global_mean = np.load("normalization_stats/w2v-bert-2.0-mu.npy")
-        global_std = np.load("normalization_stats/w2v-bert-2.0-std.npy")
-    else:
-        raise ValueError(f"{model_name} is not supported yet")
+    if args.normalize:
+        logging.info("Loading normalization stats")
+        global_mean = np.load(args.global_mean_file)
+        global_std = np.load(args.global_std_file)
     
     # load the kmeans model
     logging.info(f"Loading kmeans model from {kmeans_model_path}")
@@ -157,15 +139,28 @@ def collect_tokens(
     # extract the kmeans label
     for i, batch in enumerate(dl):
         cuts = batch["cuts"]
-        embeddings, embedding_lens = model.extract_features(batch, layer_idx)
+        features, all_hidden_states, embedding_lens = model(batch)
+        if weighted_combine:
+            all_hidden_states = torch.stack(all_hidden_states, dim=0) # (L,B,T,C)
+            all_hidden_states = weights.reshape(-1, 1,1,1) * all_hidden_states # (L,B,T,C) 
+            hidden_states = torch.sum(all_hidden_states, dim=0) # (B,T,C)
+        else:
+            if layer_idx == -1:
+                hidden_states = features
+            else:
+                hidden_states = all_hidden_states[layer_idx] # (B,T,C)
+        hidden_states = hidden_states.cpu().numpy()
         
         for j, cut in enumerate(cuts):
             cut = cut if isinstance(cut, MonoCut) else cut.tracks[0].cut
-            cur_embeddings = normalize_embedding(
-                embeddings[j, :embedding_lens[j], :],
-                global_mean,
-                global_std,
-            )[0]
+            if args.normalize:
+                cur_embeddings = normalize_embedding(
+                    hidden_states[j, :embedding_lens[j], :],
+                    global_mean,
+                    global_std,
+                )[0]
+            else:
+                cur_embeddings = hidden_states[j, :embedding_lens[j], :]
             
             labels = kmeans_model.predict(cur_embeddings)
             
@@ -198,6 +193,7 @@ if __name__=="__main__":
             manifest_path=args.manifest_path,
             kmeans_model_path=args.kmeans_model,
             output_manifest_path=args.output_manifest_path,
+            weighted_combine=args.weighted_combine,
             layer_idx=args.layer_idx,
             max_duration=args.max_duration,
         )

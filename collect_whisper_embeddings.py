@@ -36,6 +36,12 @@ def get_parser():
         type=str,
         required=True,
     )
+    
+    parser.add_argument(
+        "--input-manifest",
+        type=str,
+        required=True,
+    )
     return parser.parse_args()
 
 def remove_short_and_long_utt(c):
@@ -134,7 +140,7 @@ if __name__=="__main__":
     layer_idx = args.layer_idx
     subset = args.subset
     
-    manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
+    input_manifest = args.input_manifest
     embedding_path = f"embeddings/whisper_embeddings/whisper-{whisper_version}-layer-{layer_idx}-{subset}.h5"
     output_manifest_path = f"manifests/{subset}-whisper-{whisper_version}-layer-{layer_idx}.jsonl.gz"
     
@@ -142,7 +148,7 @@ if __name__=="__main__":
     
     collect_whisper_embeddings(
         whisper_version=whisper_version,
-        manifest_path=manifest_path,
+        manifest_path=input_manifest,
         embedding_path=embedding_path,
         output_manifest_path=output_manifest_path,
         layer_idx=layer_idx,

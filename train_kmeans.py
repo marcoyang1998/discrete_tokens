@@ -148,7 +148,6 @@ def train_kmeans(args, cuts):
     joblib.dump(km_model, args.kmeans_model_path)
     
     return km_model
-
 def compute_kmeans_label(args):
     
     logging.info(f"Loading manifest from {args.manifest_path}")

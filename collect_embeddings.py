@@ -42,6 +42,12 @@ def get_parser():
         required=True,
     )
     
+    parser.add_argument(
+        "--input-manifest",
+        type=str,
+        required=True,
+    )
+    
     return parser.parse_args()
 
 def test_hubert():
@@ -150,18 +156,18 @@ if __name__=="__main__":
     layer_idx = args.layer_idx
     subset = args.subset
     
-    manifest_path = f"data/fbank/librispeech_cuts_{subset}.jsonl.gz"
+    input_manifest = args.input_manifest
     embedding_path = f"embeddings/{model_name}_embeddings/{model_name}-{model_version}-layer-{layer_idx}-{subset}"
-    output_manifest_path = f"manifests/{subset}-{model_name}-{model_version}-layer-{layer_idx}.jsonl.gz"
+    output_manifet = f"manifests/{subset}-{model_name}-{model_version}-layer-{layer_idx}.jsonl.gz"
 
-    max_duration = 10
+    max_duration = 500
     
     collect_results(
         model_name=model_name,
         model_version=model_version,
-        manifest_path=manifest_path,
+        manifest_path=input_manifest,
         embedding_path=embedding_path,
-        output_manifest_path=output_manifest_path,
+        output_manifest_path=output_manifet,
         layer_idx=layer_idx,
         max_duration=max_duration,
     )
