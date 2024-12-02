@@ -11,7 +11,7 @@ from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
-from models import Data2Vec, WavlmModel, HuBERT, W2vBERT
+from models import get_model
 from train_kmeans import normalize_embedding
 
 from utils import str2bool
@@ -24,7 +24,7 @@ def get_parser():
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=["data2vec", "wavlm", "hubert", "w2v-bert"],
+        choices=["data2vec", "wavlm", "hubert", "w2v-bert", "whisper"],
         required=True,
     )
     
@@ -84,17 +84,7 @@ def collect_tokens(
     max_duration=200
 ):
     # loading the pre-trained model
-    if model_name == "data2vec":
-        model = Data2Vec(model_version=args.model_version)
-    elif model_name == "wavlm":
-        model = WavlmModel()
-    elif model_name == "hubert":
-        model = HuBERT(model_version=args.model_version)
-    elif model_name == "w2v-bert":
-        model = W2vBERT()
-    else:
-        raise ValueError(f"{model_name} is not supported yet")
-    
+    model = get_model(args)
     model.eval()
     
     device = torch.device("cuda")

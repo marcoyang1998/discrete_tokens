@@ -148,6 +148,7 @@ def train_kmeans(args, cuts):
     joblib.dump(km_model, args.kmeans_model_path)
     
     return km_model
+
 def compute_kmeans_label(args):
     
     logging.info(f"Loading manifest from {args.manifest_path}")
@@ -161,6 +162,11 @@ def compute_kmeans_label(args):
         logging.info(f"Loading pretrained kmeans model from {args.kmeans_model_path}")
         km_model = joblib.load(args.kmeans_model_path)
         
+    if os.path.exists(args.output_manifest):
+        logging.info(f"Manifest already exists at: {args.output_manifest}")
+        logging.info("Skip it")
+        return
+    
     if args.normalize:
         global_mean = np.load(f"normalization_stats/{args.model_name}-{args.model_version}-mu.npy")
         global_std = np.load(f"normalization_stats/{args.model_name}-{args.model_version}-std.npy")
