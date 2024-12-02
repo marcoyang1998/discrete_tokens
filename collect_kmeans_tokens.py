@@ -5,7 +5,7 @@ import os
 
 import torch
 import numpy as np
-from lhotse import load_manifest_lazy, CutSet
+from lhotse import load_manifest, CutSet
 from lhotse.cut import MonoCut
 from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
@@ -14,7 +14,7 @@ from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 from models import get_model
 from train_kmeans import normalize_embedding
 
-from utils import str2bool
+from utils import str2bool, remove_long_utterances
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -90,7 +90,9 @@ def collect_tokens(
     device = torch.device("cuda")
     model.to(device)
     
-    manifest = load_manifest_lazy(manifest_path)
+    manifest = load_manifest(manifest_path)
+    manifest = manifest.filter(remove_long_utterances)
+    
     dataset = UnsupervisedWaveformDataset(
         manifest
     )
@@ -173,6 +175,7 @@ if __name__=="__main__":
     logging.basicConfig(format=formatter, level=logging.INFO)
     
     args = get_parser()
+    logging.info(vars(args))
     
     if os.path.exists(args.output_manifest_path):
         logging.info(f"The manifest {args.output_manifest_path} already exists. Skip this subset.")

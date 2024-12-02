@@ -4,13 +4,14 @@ import logging
 import torch
 import os
 
-from lhotse import load_manifest_lazy, CutSet
+from lhotse import load_manifest, CutSet
 from lhotse.features.io import LilcomChunkyWriter, NumpyHdf5Writer
 from lhotse.utils import fastcopy
 from torch.utils.data import DataLoader
 from lhotse.dataset import DynamicBucketingSampler, UnsupervisedWaveformDataset
 
 from models import get_model
+from utils import remove_long_utterances
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -90,7 +91,9 @@ def collect_results(
     
     model.eval()
     
-    manifest = load_manifest_lazy(manifest_path)
+    manifest = load_manifest(manifest_path)
+    manifest = manifest.filter(remove_long_utterances)
+    
     dataset = UnsupervisedWaveformDataset(
         manifest
     )

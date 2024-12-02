@@ -1,6 +1,11 @@
 import argparse
 import torch
 
+def remove_long_utterances(c):
+    if c.duration > 29.9:
+        return False
+    return True
+
 def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
     """
     Args:
