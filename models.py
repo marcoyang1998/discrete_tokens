@@ -110,6 +110,7 @@ class WhisperModel(torch.nn.Module):
         self,
         batch,
         layer_idx,
+        return_numpy: bool = True,
     ):
         audio = batch["audio"]
         audio_lens = batch["audio_lens"]
@@ -117,7 +118,10 @@ class WhisperModel(torch.nn.Module):
         layer_results, embedding_lens = self.get_embeddings(
             audio, audio_lens, layer_idx,
         )
-        return layer_results.cpu().numpy(), embedding_lens.cpu().numpy()
+        if return_numpy:
+            return layer_results.cpu().numpy(), embedding_lens.cpu().numpy()
+        else:
+            return layer_results.cpu(), embedding_lens.cpu()
     
     @torch.no_grad()
     def get_embeddings(
@@ -172,6 +176,7 @@ class HuggingfaceModel(torch.nn.Module):
         self,
         batch: Dict,
         layer_idx: int,
+        return_numpy: bool = True,
     ):
         audios = self.prepare_input_data(batch)
         # the audios should be a list of np array, without padding
@@ -190,10 +195,12 @@ class HuggingfaceModel(torch.nn.Module):
             **inputs,
         )
         all_layer_results = outputs.hidden_states
-        layer_results = all_layer_results[layer_idx].cpu().numpy() # (N,T,C)
+        layer_results = all_layer_results[layer_idx] # (N,T,C)
         padding_mask = self.model._get_feature_vector_attention_mask(layer_results.shape[1], inputs["attention_mask"])
         embedding_lens = padding_mask.sum(dim=1)
         
+        if return_numpy:
+            layer_results = layer_results.cpu().numpy()
         return layer_results, embedding_lens
     
     def forward(self, batch):
@@ -229,7 +236,7 @@ class Data2Vec(HuggingfaceModel):
     
     
 class HuBERT(HuggingfaceModel):
-    def __init__(self, model_version: str="large", normalize: bool=True):
+    def __init__(self, model_version: str="large"):
         super().__init__()
         if model_version == "large":
             self.processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{model_version}-ll60k")
@@ -237,7 +244,9 @@ class HuBERT(HuggingfaceModel):
         elif model_version == "base":
             self.processor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/hubert-{model_version}-ls960")
             self.model = AutoModel.from_pretrained(f"facebook/hubert-{model_version}-ls960")
-        self.processor.do_normalize = normalize
+            self.processor.do_normalize = False
+        else:
+            raise ValueError(f"Unseen model version: {model_version}")
         
 class W2vBERT(HuggingfaceModel):
     def __init__(self, model_version: str="large"):
