@@ -133,7 +133,7 @@ def collect_results(
                 )
                 new_cut = fastcopy(
                     cut,
-                    custom={f"{model_name}_embedding": embedding}
+                    custom={f"embedding": embedding} # remove model name to be more generic
                 )
                 new_cuts.append(new_cut)
                 num_cuts += 1
